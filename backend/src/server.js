@@ -1,11 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import pool, { testConnection } from './config/db.js';
 
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors({
@@ -15,11 +16,22 @@ app.use(cors({
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Basic health-check route for initial setup verification
-app.get('/api/health', (req, res) => {
+// Basic health-check route verifying both server and database connectivity
+app.get('/api/health', async (req, res) => {
+  let dbStatus = 'disconnected';
+  try {
+    const connection = await pool.getConnection();
+    await connection.ping();
+    connection.release();
+    dbStatus = 'connected';
+  } catch (error) {
+    dbStatus = `disconnected (${error.message})`;
+  }
+
   res.status(200).json({
     status: 'success',
     message: 'Buyer Management Portal Backend API is running',
+    database: dbStatus,
     timestamp: new Date().toISOString()
   });
 });
@@ -34,9 +46,23 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT} in ${process.env.NODE_ENV || 'development'} mode`);
-});
+// Start server with fallback if port is in use
+const startServer = (port) => {
+  const server = app.listen(port, async () => {
+    console.log(`Server is running on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);
+    await testConnection();
+  });
+
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`[Server] Port ${port} is in use (macOS AirPlay often reserves 5000). Falling back to port ${port + 1}...`);
+      startServer(port + 1);
+    } else {
+      console.error('[Server Error]', err);
+    }
+  });
+};
+
+startServer(Number(PORT));
 
 export default app;
