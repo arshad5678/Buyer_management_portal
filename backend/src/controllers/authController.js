@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import UserModel from '../models/userModel.js';
+import { normalizeMobile } from '../middlewares/authValidation.js';
 
 /**
  * Handle new user registration
@@ -9,8 +10,13 @@ export const register = async (req, res, next) => {
   try {
     const { name, email, mobile, password } = req.body;
 
-    // Check if email already exists
-    const existingEmail = await UserModel.findByEmail(email);
+    // Normalize inputs to ensure consistent comparisons and storage
+    const normalizedEmail = (email || '').toLowerCase().trim();
+    const normalizedMobile = normalizeMobile(mobile);
+    const trimmedName = (name || '').trim();
+
+    // 1. Check whether email already exists
+    const existingEmail = await UserModel.findByEmail(normalizedEmail);
     if (existingEmail) {
       return res.status(409).json({
         status: 'fail',
@@ -18,8 +24,8 @@ export const register = async (req, res, next) => {
       });
     }
 
-    // Check if mobile already exists
-    const existingMobile = await UserModel.findByMobile(mobile);
+    // 2. Check whether mobile already exists
+    const existingMobile = await UserModel.findByMobile(normalizedMobile);
     if (existingMobile) {
       return res.status(409).json({
         status: 'fail',
@@ -27,19 +33,19 @@ export const register = async (req, res, next) => {
       });
     }
 
-    // Securely hash the password with bcryptjs (salt rounds = 10)
+    // 3. Securely hash password with bcryptjs (salt rounds = 10)
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    // Save the user in MySQL
+    // 4. Insert sanitized record into database
     const newUser = await UserModel.createUser({
-      name,
-      email,
-      mobile,
+      name: trimmedName,
+      email: normalizedEmail,
+      mobile: normalizedMobile,
       passwordHash
     });
 
-    // Return success response without exposing password or password_hash
+    // 5. Return success response (never return password or password_hash)
     return res.status(201).json({
       status: 'success',
       message: 'User registered successfully',
@@ -51,23 +57,28 @@ export const register = async (req, res, next) => {
       }
     });
   } catch (error) {
-    // Safety check for MySQL duplicate entry constraint race condition
+    // Database-level race condition handling for duplicate entries
     if (error.code === 'ER_DUP_ENTRY') {
-      if (error.message.includes('email')) {
+      const errMsg = (error.message || '').toLowerCase();
+      if (errMsg.includes('email')) {
         return res.status(409).json({
           status: 'fail',
           message: 'Email is already registered'
         });
       }
-      if (error.message.includes('mobile')) {
+      if (errMsg.includes('mobile')) {
         return res.status(409).json({
           status: 'fail',
           message: 'Mobile number is already registered'
         });
       }
+      return res.status(409).json({
+        status: 'fail',
+        message: 'A user with this email or mobile number already exists'
+      });
     }
 
-    // Forward unexpected database or server errors to centralized error handler
+    // Forward any other unexpected errors to centralized error handler
     next(error);
   }
 };
