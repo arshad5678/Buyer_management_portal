@@ -2,6 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import pool, { testConnection } from './config/db.js';
+import authRoutes from './routes/authRoutes.js';
+import errorHandler from './middlewares/errorHandler.js';
 
 dotenv.config();
 
@@ -36,15 +38,19 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-// Centralized error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Unhandled Error:', err);
-  const statusCode = err.statusCode || 500;
-  res.status(statusCode).json({
-    status: 'error',
-    message: err.message || 'Internal Server Error'
+// Mount Routes
+app.use('/api/auth', authRoutes);
+
+// 404 Handler for undefined routes
+app.use((req, res) => {
+  res.status(404).json({
+    status: 'fail',
+    message: `Cannot ${req.method} ${req.originalUrl} - endpoint not found`
   });
 });
+
+// Centralized error handling middleware
+app.use(errorHandler);
 
 // Start server with fallback if port is in use
 const startServer = (port) => {
