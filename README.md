@@ -2,6 +2,11 @@
 
 A full-stack SaaS portal for managing buyers, importing invoices from spreadsheets (CSV, XLS, XLSX), tracking payments/balances, and multi-tenant user authentication.
 
+### 🌐 Live Application & Demo Links
+- **Frontend Application (Vercel)**: [https://buyer-management-portal.vercel.app](https://buyer-management-portal.vercel.app)
+- **Backend REST API (Render)**: [https://buyer-management-portal.onrender.com](https://buyer-management-portal.onrender.com)
+- **API Health Check**: [https://buyer-management-portal.onrender.com/api/health](https://buyer-management-portal.onrender.com/api/health)
+
 ---
 
 ## 🛠 Technology Stack
@@ -78,10 +83,56 @@ Create the database and schema using MySQL client:
 mysql -u root -p < database/schema.sql
 ```
 
-The schema creates three tables:
+The schema creates three core tables:
 1. `users` — account credentials and contact details.
 2. `sessions` — database-backed sessions with SHA-256 hashed refresh tokens, idle activity timestamps, and revocation markers.
 3. `buyers` — user-isolated buyer records with monetary amounts (`total_invoice_amount`, `total_amount_paid`, `total_amount_due`).
+
+#### Entity-Relationship (ER) Diagram
+
+```mermaid
+erDiagram
+    users ||--o{ buyers : "owns (1:N)"
+    users ||--o{ sessions : "has active (1:N)"
+
+    users {
+        int id PK "Auto Increment"
+        varchar name "Full Name"
+        varchar email UK "Unique Email"
+        varchar mobile UK "Unique Indian Mobile (10-digit)"
+        varchar password_hash "Salted Bcrypt Hash"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    buyers {
+        int id PK "Auto Increment"
+        int user_id FK "References users(id) ON DELETE CASCADE"
+        varchar name "Buyer Name"
+        varchar email "Buyer Email"
+        varchar mobile "Buyer Phone"
+        text address "Physical Address"
+        decimal total_invoice_amount "DECIMAL(15, 2)"
+        decimal total_amount_paid "DECIMAL(15, 2)"
+        decimal total_amount_due "DECIMAL(15, 2)"
+        timestamp created_at
+        timestamp updated_at
+    }
+
+    sessions {
+        int id PK "Auto Increment"
+        int user_id FK "References users(id) ON DELETE CASCADE"
+        varchar refresh_token_hash "SHA-256 Hash"
+        timestamp expires_at "7-day absolute expiry"
+        timestamp last_active_at "10-minute idle tracker"
+        timestamp revoked_at "Revocation timestamp"
+        timestamp created_at
+    }
+```
+
+Files provided:
+- [database/schema.sql](database/schema.sql) — local schema initialization with `CREATE DATABASE`.
+- [database/schema_production.sql](database/schema_production.sql) — production schema for managed cloud databases (Aiven, RDS, PlanetScale).
 
 ---
 
@@ -187,3 +238,16 @@ Builds production-ready static assets in `frontend/dist` without errors.
 6. **HttpOnly Cookies**: Refresh tokens are set with `httpOnly: true`. In production (`NODE_ENV=production`), `secure: true` (HTTPS) and `sameSite: strict` are enforced.
 7. **Multi-Tenant User Isolation**: All buyer queries and bulk uploads are scoped strictly to `req.user.userId`. Parameterized SQL queries prevent SQL injection and horizontal privilege escalation.
 8. **Atomic Ingestion**: File uploads validate all rows before writing to MySQL within an explicit transaction. Any row failure aborts the transaction with zero records inserted.
+
+---
+
+## 🏆 Bonus Deliverables Completed
+
+| Bonus Feature | Implementation Details | Location in Codebase |
+|---|---|---|
+| **Refresh Token Implementation** | Secure HttpOnly cookie-based refresh token with SHA-256 database hashing, automatic rotation on refresh, and 10-minute server-side idle timeout. | [sessionModel.js](backend/src/models/sessionModel.js), [authController.js](backend/src/controllers/authController.js) |
+| **Clean Architecture (MVC Pattern)** | Strict separation of concerns across Models (database layer), Controllers (HTTP/request handling), Routes, Middlewares, and Services. | `backend/src/{models,controllers,routes,middlewares,services}` |
+| **Proper Middleware & Error Handling** | JWT authentication guard, Multer file upload filter, input validators, normalized CORS policy, and centralized Express error handler. | [authMiddleware.js](backend/src/middlewares/authMiddleware.js), [errorHandler.js](backend/src/middlewares/errorHandler.js) |
+| **Automated Testing Suite** | Comprehensive 82-assertion test suite covering Auth (14), Upload atomic transactions (14), and Buyer search/pagination/SQLi prevention (54). | [test/](backend/test/) |
+| **Multi-Tenant User Isolation & RBAC** | Strict row-level user scoping on all buyer CRUD endpoints, preventing cross-tenant data leaks and unauthorized record access. | [buyerModel.js](backend/src/models/buyerModel.js), [buyerController.js](backend/src/controllers/buyerController.js) |
+
