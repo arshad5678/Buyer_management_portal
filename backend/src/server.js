@@ -17,8 +17,16 @@ if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
 }
 
+const rawClientUrl = process.env.CLIENT_URL;
+const allowedOrigin = rawClientUrl
+  ? (rawClientUrl.startsWith('http://') || rawClientUrl.startsWith('https://')
+      ? rawClientUrl
+      : `https://${rawClientUrl}`
+    ).replace(/\/+$/, '')
+  : 'http://localhost:5173';
+
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:5173',
+  origin: allowedOrigin,
   credentials: true
 }));
 app.use(cookieParser());
