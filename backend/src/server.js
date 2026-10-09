@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import dotenv from 'dotenv';
 import pool, { testConnection } from './config/db.js';
 import authRoutes from './routes/authRoutes.js';
+import buyerRoutes from './routes/buyerRoutes.js';
 import errorHandler from './middlewares/errorHandler.js';
 
 dotenv.config();
@@ -42,6 +43,7 @@ app.get('/api/health', async (req, res) => {
 
 // Mount Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/buyers', buyerRoutes);
 
 // 404 Handler for undefined routes
 app.use((req, res) => {

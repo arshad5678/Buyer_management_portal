@@ -19,6 +19,16 @@ const getCookieOptions = () => {
   };
 };
 
+const getClearCookieOptions = () => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    path: '/'
+  };
+};
+
 /**
  * Handle new user registration
  * POST /api/auth/register
@@ -216,7 +226,7 @@ export const refreshToken = async (req, res, next) => {
     if (session.revoked_at) {
       // Security measure: Revoke all sessions for this user due to potential token theft
       await SessionModel.revokeAllUserSessions(session.user_id);
-      res.clearCookie('refreshToken', getCookieOptions());
+      res.clearCookie('refreshToken', getClearCookieOptions());
       return res.status(401).json({
         status: 'fail',
         message: 'Security alert: Refresh token reuse detected. All sessions revoked. Please log in again'
@@ -228,7 +238,7 @@ export const refreshToken = async (req, res, next) => {
     // Check absolute expiration
     if (new Date(session.expires_at) < now) {
       await SessionModel.revokeSession(session.id);
-      res.clearCookie('refreshToken', getCookieOptions());
+      res.clearCookie('refreshToken', getClearCookieOptions());
       return res.status(401).json({
         status: 'fail',
         message: 'Session has expired. Please log in again'
@@ -241,7 +251,7 @@ export const refreshToken = async (req, res, next) => {
 
     if (idleDuration >= IDLE_TIMEOUT_MS) {
       await SessionModel.revokeSession(session.id);
-      res.clearCookie('refreshToken', getCookieOptions());
+      res.clearCookie('refreshToken', getClearCookieOptions());
       return res.status(401).json({
         status: 'fail',
         message: 'Session expired due to inactivity. Please log in again'
@@ -307,7 +317,7 @@ export const logout = async (req, res, next) => {
     }
 
     // 3. Clear HttpOnly refresh token cookie
-    res.clearCookie('refreshToken', getCookieOptions());
+    res.clearCookie('refreshToken', getClearCookieOptions());
 
     return res.status(200).json({
       status: 'success',
