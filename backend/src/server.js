@@ -33,6 +33,15 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'success',
+    message: 'Buyer Management Portal Backend API is active',
+    frontend: process.env.CLIENT_URL || 'https://buyer-management-portal.vercel.app',
+    healthCheck: '/api/health'
+  });
+});
+
 app.get('/api/health', async (req, res) => {
   let dbStatus = 'disconnected';
   try {
