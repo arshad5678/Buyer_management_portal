@@ -55,6 +55,10 @@ app.get('/api/health', async (req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/buyers', buyerRoutes);
 
+// Route aliases to support clients requesting with or without /api prefix
+app.use('/auth', authRoutes);
+app.use('/buyers', buyerRoutes);
+
 app.use((req, res) => {
   res.status(404).json({
     status: 'fail',

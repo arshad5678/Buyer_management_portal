@@ -9,8 +9,13 @@
  */
 import axios from 'axios';
 
+const rawBaseUrl = (import.meta.env.VITE_API_URL || '/api').trim();
+const normalizedBaseUrl = rawBaseUrl.endsWith('/api')
+  ? rawBaseUrl
+  : `${rawBaseUrl.replace(/\/+$/, '')}/api`;
+
 const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || '/api',
+  baseURL: normalizedBaseUrl,
   withCredentials: true,           // required for HttpOnly cookie handling
   headers: {
     'Content-Type': 'application/json',
