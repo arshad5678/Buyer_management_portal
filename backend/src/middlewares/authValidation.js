@@ -69,3 +69,21 @@ export const validateRegister = [
   ...registerValidationRules,
   validateResult
 ];
+
+/**
+ * Login request validation chain
+ */
+export const loginValidationRules = [
+  body('identifier')
+    .trim()
+    .notEmpty().withMessage('Identifier (email or mobile) is required'),
+
+  body('password')
+    .notEmpty().withMessage('Password is required')
+];
+
+export const validateLogin = [
+  ...loginValidationRules,
+  validateResult
+];
+
