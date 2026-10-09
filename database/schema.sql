@@ -50,3 +50,25 @@ CREATE TABLE IF NOT EXISTS buyers (
   INDEX idx_buyers_email (email),
   INDEX idx_buyers_mobile (mobile)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 4. Sessions Table
+-- Stores refresh tokens, revocation state, and activity timestamps for idle timeout
+CREATE TABLE IF NOT EXISTS sessions (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  user_id INT NOT NULL,
+  refresh_token_hash VARCHAR(255) NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  last_active_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  revoked_at TIMESTAMP NULL DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+  -- Foreign Key Constraint (Cascades on delete of referencing user)
+  CONSTRAINT fk_sessions_user_id
+    FOREIGN KEY (user_id)
+    REFERENCES users (id)
+    ON DELETE CASCADE,
+
+  -- Indexes for fast session lookup and user-specific session invalidation
+  INDEX idx_sessions_user_id (user_id),
+  INDEX idx_sessions_refresh_token_hash (refresh_token_hash)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -1,10 +1,14 @@
 import jwt from 'jsonwebtoken';
+import SessionModel from '../models/sessionModel.js';
+
+// 10-minute idle session timeout in milliseconds
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
 
 /**
- * Middleware to verify JWT access tokens from Authorization header
+ * Middleware to verify JWT access tokens from Authorization header and validate active session state
  * Header format required: "Bearer <accessToken>"
  */
-export const authenticateToken = (req, res, next) => {
+export const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers.authorization;
 
   if (!authHeader) {
@@ -43,10 +47,62 @@ export const authenticateToken = (req, res, next) => {
       });
     }
 
-    // Attach authenticated identity from the verified payload
-    req.user = {
-      userId: decoded.userId
-    };
+    // If session ID is present, perform database-backed session validation
+    if (decoded.sessionId) {
+      const session = await SessionModel.findById(decoded.sessionId);
+
+      if (!session) {
+        return res.status(401).json({
+          status: 'fail',
+          message: 'Session not found or invalid. Please log in again'
+        });
+      }
+
+      // Check whether session has been revoked (e.g. via logout)
+      if (session.revoked_at) {
+        return res.status(401).json({
+          status: 'fail',
+          message: 'Session has been revoked. Please log in again'
+        });
+      }
+
+      const now = new Date();
+
+      // Check absolute expiration
+      if (new Date(session.expires_at) < now) {
+        await SessionModel.revokeSession(session.id);
+        return res.status(401).json({
+          status: 'fail',
+          message: 'Session has expired. Please log in again'
+        });
+      }
+
+      // Check 10-minute idle session timeout
+      const lastActive = new Date(session.last_active_at);
+      const idleDuration = now.getTime() - lastActive.getTime();
+
+      if (idleDuration >= IDLE_TIMEOUT_MS) {
+        // Revoke the session due to inactivity
+        await SessionModel.revokeSession(session.id);
+        return res.status(401).json({
+          status: 'fail',
+          message: 'Session expired due to inactivity. Please log in again'
+        });
+      }
+
+      // Update last_active_at only after successful verification
+      await SessionModel.updateLastActive(session.id);
+
+      req.user = {
+        userId: session.user_id,
+        sessionId: session.id
+      };
+    } else {
+      // Fallback for tokens without sessionId
+      req.user = {
+        userId: decoded.userId
+      };
+    }
 
     next();
   } catch (error) {

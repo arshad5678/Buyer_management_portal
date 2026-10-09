@@ -1,7 +1,23 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import UserModel from '../models/userModel.js';
+import SessionModel from '../models/sessionModel.js';
 import { normalizeMobile } from '../middlewares/authValidation.js';
+
+// 10-minute idle session timeout in milliseconds
+const IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+
+// Cookie options for secure HttpOnly refresh token cookie
+const getCookieOptions = () => {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: isProduction ? 'strict' : 'lax',
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days absolute lifetime
+    path: '/'
+  };
+};
 
 /**
  * Handle new user registration
@@ -121,7 +137,19 @@ export const login = async (req, res, next) => {
       });
     }
 
-    // 4. Generate JWT with 10-minute expiry
+    // 4. Generate cryptographically random refresh token & hash it
+    const rawRefreshToken = SessionModel.generateToken();
+    const refreshTokenHash = SessionModel.hashToken(rawRefreshToken);
+    const sessionExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7-day absolute lifetime
+
+    // 5. Create database session record
+    const session = await SessionModel.createSession({
+      userId: user.id,
+      refreshTokenHash,
+      expiresAt: sessionExpiresAt
+    });
+
+    // 6. Generate JWT with 10-minute expiry containing { userId, sessionId }
     const jwtSecret = process.env.JWT_SECRET;
     if (!jwtSecret) {
       throw new Error('JWT_SECRET is not configured in environment variables');
@@ -129,12 +157,15 @@ export const login = async (req, res, next) => {
     const expiresIn = process.env.JWT_EXPIRES_IN || '10m';
 
     const accessToken = jwt.sign(
-      { userId: user.id },
+      { userId: user.id, sessionId: session.id },
       jwtSecret,
       { expiresIn }
     );
 
-    // 5. Return success response (never expose password or password_hash)
+    // 7. Set HttpOnly cookie for refresh token
+    res.cookie('refreshToken', rawRefreshToken, getCookieOptions());
+
+    // 8. Return success response (never expose password or password_hash)
     return res.status(200).json({
       status: 'success',
       message: 'Login successful',
@@ -145,8 +176,142 @@ export const login = async (req, res, next) => {
           email: user.email,
           mobile: user.mobile
         },
-        accessToken
+        accessToken,
+        refreshToken: rawRefreshToken
       }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Handle refresh token rotation and issue a fresh access token
+ * POST /api/auth/refresh
+ */
+export const refreshToken = async (req, res, next) => {
+  try {
+    // Read refresh token from either HttpOnly cookie or request body
+    const rawToken = req.cookies?.refreshToken || req.body?.refreshToken;
+
+    if (!rawToken) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Refresh token is required'
+      });
+    }
+
+    const tokenHash = SessionModel.hashToken(rawToken);
+    const session = await SessionModel.findByTokenHash(tokenHash);
+
+    // Check if session exists
+    if (!session) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Invalid or expired refresh token'
+      });
+    }
+
+    // Check if session was already revoked (Reuse Detection!)
+    if (session.revoked_at) {
+      // Security measure: Revoke all sessions for this user due to potential token theft
+      await SessionModel.revokeAllUserSessions(session.user_id);
+      res.clearCookie('refreshToken', getCookieOptions());
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Security alert: Refresh token reuse detected. All sessions revoked. Please log in again'
+      });
+    }
+
+    const now = new Date();
+
+    // Check absolute expiration
+    if (new Date(session.expires_at) < now) {
+      await SessionModel.revokeSession(session.id);
+      res.clearCookie('refreshToken', getCookieOptions());
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Session has expired. Please log in again'
+      });
+    }
+
+    // Check 10-minute idle session timeout
+    const lastActive = new Date(session.last_active_at);
+    const idleDuration = now.getTime() - lastActive.getTime();
+
+    if (idleDuration >= IDLE_TIMEOUT_MS) {
+      await SessionModel.revokeSession(session.id);
+      res.clearCookie('refreshToken', getCookieOptions());
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Session expired due to inactivity. Please log in again'
+      });
+    }
+
+    // Rotate refresh token: generate new token and hash
+    const newRawToken = SessionModel.generateToken();
+    const newTokenHash = SessionModel.hashToken(newRawToken);
+
+    // Atomically rotate token
+    const rotated = await SessionModel.rotateToken(session.id, tokenHash, newTokenHash);
+
+    if (!rotated) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Concurrent refresh conflict detected'
+      });
+    }
+
+    // Generate fresh access token
+    const jwtSecret = process.env.JWT_SECRET;
+    const expiresIn = process.env.JWT_EXPIRES_IN || '10m';
+
+    const newAccessToken = jwt.sign(
+      { userId: session.user_id, sessionId: session.id },
+      jwtSecret,
+      { expiresIn }
+    );
+
+    // Update HttpOnly cookie with new rotated refresh token
+    res.cookie('refreshToken', newRawToken, getCookieOptions());
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Token refreshed successfully',
+      data: {
+        accessToken: newAccessToken,
+        refreshToken: newRawToken
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Handle user logout: revokes current database session and clears cookie
+ * POST /api/auth/logout
+ */
+export const logout = async (req, res, next) => {
+  try {
+    // 1. If authenticated via authMiddleware, revoke session by ID
+    if (req.user?.sessionId) {
+      await SessionModel.revokeSession(req.user.sessionId);
+    }
+
+    // 2. Also check if a refresh token was supplied (cookie or body) and revoke it
+    const rawToken = req.cookies?.refreshToken || req.body?.refreshToken;
+    if (rawToken) {
+      const tokenHash = SessionModel.hashToken(rawToken);
+      await SessionModel.revokeByTokenHash(tokenHash);
+    }
+
+    // 3. Clear HttpOnly refresh token cookie
+    res.clearCookie('refreshToken', getCookieOptions());
+
+    return res.status(200).json({
+      status: 'success',
+      message: 'Logged out successfully'
     });
   } catch (error) {
     next(error);
@@ -182,4 +347,3 @@ export const getMe = async (req, res, next) => {
     next(error);
   }
 };
-
