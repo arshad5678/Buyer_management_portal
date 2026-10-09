@@ -1,46 +1,61 @@
 # Buyer Management Portal
 
-A full-stack web application designed for streamlined buyer management, authentication, and invoice data ingestion from CSV and Excel spreadsheets.
+A full-stack SaaS portal for managing buyers, importing invoices from spreadsheets (CSV, XLS, XLSX), tracking payments/balances, and multi-tenant user authentication.
 
 ---
 
 ## 🛠 Technology Stack
 
-- **Frontend**: React (Vite), Axios, Vanilla CSS
+- **Frontend**: React 18, Vite, React Router v7, Axios, Vanilla CSS (Design Tokens & Responsive Grid)
 - **Backend**: Node.js, Express.js (MVC Architecture)
-- **Database**: MySQL (via `mysql2`)
-- **Authentication**: JSON Web Tokens (JWT) & bcrypt password hashing
-- **File Ingestion**: Multer, `csv-parser` (CSV), `xlsx` (Excel)
+- **Database**: MySQL 8.0+ (via `mysql2/promise` connection pool)
+- **Authentication**: JWT access tokens (10m expiry), cryptographically random refresh tokens (SHA-256 hashed in database), HttpOnly cookies, idle session tracking (10m timeout)
+- **File Ingestion**: Multer (5 MB RAM memory storage), `csv-parser` (streaming CSV), `xlsx` (Excel), atomic database transactions
+- **Testing**: Node.js native test runner with custom assertions, Supertest
 
 ---
 
 ## 📂 Project Structure
 
 ```text
-buyer-management-portal/
+buyer_management_portal/
 ├── backend/
 │   ├── src/
-│   │   ├── config/          # Database and app configurations
-│   │   ├── controllers/     # MVC Controllers (request/response handling)
-│   │   ├── middlewares/     # Auth, file upload, and validation middlewares
-│   │   ├── models/          # Database query models
-│   │   ├── routes/          # RESTful API route definitions
-│   │   ├── utils/           # Helper utilities
-│   │   └── server.js        # Express app entry point
-│   ├── .env.example         # Template for environment variables
-│   ├── .env                 # Local environment variables (git-ignored)
-│   └── package.json         # Backend dependencies and scripts
+│   │   ├── config/          # MySQL database connection pool
+│   │   ├── controllers/     # Auth and Buyer controllers
+│   │   ├── middlewares/     # JWT authentication, file upload, and validation
+│   │   ├── models/          # User, Buyer, and Session database models
+│   │   ├── routes/          # RESTful auth and buyer routes
+│   │   ├── services/        # File parser and spreadsheet row validator
+│   │   └── server.js        # Express app entry point & port fallback logic
+│   ├── test/                # Automated backend test suites
+│   │   ├── authTest.js      # Auth, JWT, session rotation & revocation tests (14 tests)
+│   │   ├── buyerUploadTest.js # Multipart upload, limits & rollback tests (14 tests)
+│   │   └── buyerListTest.js # Search, pagination & user isolation tests (54 tests)
+│   ├── .env.example         # Template for environment variables (clean placeholders)
+│   ├── .env                 # Local backend environment variables (git-ignored)
+│   └── package.json         # Backend dependencies & test scripts
 │
 ├── frontend/
-│   ├── src/                 # React components, pages, services, styles
-│   ├── index.html           # HTML template
-│   ├── vite.config.js       # Vite configuration with /api proxy
-│   └── package.json         # Frontend dependencies and scripts
+│   ├── src/
+│   │   ├── api/             # Axios client with 401 silent token refresh & API helpers
+│   │   ├── components/      # Responsive Navbar, Footer, and ProtectedRoute
+│   │   ├── context/         # AuthContext provider & useAuth hook
+│   │   ├── pages/           # LandingPage, SignUpPage, LoginPage, DashboardPage,
+│   │   │                    # UploadPage, BuyerListPage, PlaceholderPage
+│   │   ├── App.jsx          # Route tree configuration
+│   │   ├── index.css        # Global CSS design system tokens
+│   │   └── main.jsx         # React DOM root entry
+│   ├── .env.example         # Template for frontend environment variables
+│   ├── .env                 # Local frontend environment variables (git-ignored)
+│   ├── vite.config.js       # Vite configuration with /api reverse proxy
+│   └── package.json         # Frontend dependencies & build scripts
 │
 ├── database/
-│   └── schema.sql           # Database schema & migrations
+│   ├── schema.sql           # Schema definition (users, buyers, sessions tables)
+│   └── migrations/          # Incremental database migrations
 │
-├── .gitignore               # Root git ignore rules
+├── .gitignore               # Root git ignore rules (ignores .env, dist, node_modules)
 └── README.md                # Project documentation
 ```
 
@@ -48,84 +63,127 @@ buyer-management-portal/
 
 ## ⚙️ Prerequisites
 
-- **Node.js**: v18.0.0 or higher (Installed: `v25.2.1`)
-- **npm**: v9.0.0 or higher (Installed: `11.6.2`)
+- **Node.js**: v18.0.0 or higher
+- **npm**: v9.0.0 or higher
 - **MySQL Server**: v8.0 or higher running locally or remotely
 
 ---
 
 ## 🚀 Getting Started
 
-### 1. Clone & Navigate
+### 1. Database Setup
+
+Create the database and schema using MySQL client:
 ```bash
-git clone <repository-url>
-cd buyer_management_portal
+mysql -u root -p < database/schema.sql
 ```
 
+The schema creates three tables:
+1. `users` — account credentials and contact details.
+2. `sessions` — database-backed sessions with SHA-256 hashed refresh tokens, idle activity timestamps, and revocation markers.
+3. `buyers` — user-isolated buyer records with monetary amounts (`total_invoice_amount`, `total_amount_paid`, `total_amount_due`).
+
+---
+
 ### 2. Backend Setup
+
 ```bash
-# Navigate to backend directory
 cd backend
 
-# Install dependencies (if not already installed)
+# Install dependencies
 npm install
 
 # Copy environment variables template
 cp .env.example .env
+```
 
-# Start backend in development mode (runs on port 5001)
+Ensure `backend/.env` contains your MySQL credentials and a secure JWT secret:
+```env
+PORT=5001
+NODE_ENV=development
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=your_mysql_password
+DB_NAME=buyer_management_portal
+JWT_SECRET=your_long_random_jwt_secret_key
+JWT_EXPIRES_IN=10m
+REFRESH_TOKEN_EXPIRES_IN=7d
+SESSION_IDLE_TIMEOUT=10m
+CLIENT_URL=http://localhost:5173
+```
+
+Start the backend:
+```bash
 npm run dev
 ```
 
-> **Note on Port 5001**: macOS uses port `5000` for AirPlay Receiver (`ControlCenter`). The backend is configured to use port `5001` by default to avoid conflicts.
+> **Note on macOS / Port**: Port `5000` is reserved by AirPlay Receiver on macOS. `backend/.env` sets `PORT=5001` by default to avoid this conflict. The server also includes an automatic port-fallback mechanism if 5001 is also in use.
+
+---
 
 ### 3. Frontend Setup
-In a new terminal:
+
+In a new terminal window:
 ```bash
-# Navigate to frontend directory
 cd frontend
 
-# Install dependencies (if not already installed)
+# Install dependencies
 npm install
 
-# Start Vite development server (runs on port 5173)
+# Copy environment variables template
+cp .env.example .env
+```
+
+Ensure `frontend/.env` contains:
+```env
+# Uses Vite's built-in /api proxy (configured in vite.config.js) — no CORS issues in development
+VITE_API_URL=/api
+```
+
+> **For production**: set `VITE_API_URL` to your deployed backend URL (e.g. `https://api.yourdomain.com/api`).
+
+Start the Vite development server:
+```bash
 npm run dev
+# Server runs on http://localhost:5173
 ```
 
 ---
 
-## 🧪 How to Verify the Initial Setup
+## 🧪 Automated Testing
 
-1. **Verify Backend Health Endpoint**:
-   ```bash
-   curl http://localhost:5001/api/health
-   ```
-   **Expected Response**:
-   ```json
-   {
-     "status": "success",
-     "message": "Buyer Management Portal Backend API is running",
-     "timestamp": "..."
-   }
-   ```
+The backend includes 82 automated test assertions across three test suites:
 
-2. **Verify Frontend Build & Dev Server**:
-   ```bash
-   cd frontend
-   npm run build
-   ```
-   **Expected Result**: Successful build output in `./dist` without errors.
+```bash
+cd backend
+
+# Run the complete test suite (82 assertions)
+npm test
+
+# Run individual test suites
+npm run test:auth    # 14 tests: registration, validation, login, JWT verification, session rotation & logout
+npm run test:upload  # 14 tests: file formats, 5MB limit, row validation, atomic transaction rollback
+npm run test:list    # 54 tests: pagination, multi-field search, user data isolation, SQL injection prevention
+```
+
+### Production Build Verification
+
+```bash
+cd frontend
+npm run build
+```
+Builds production-ready static assets in `frontend/dist` without errors.
 
 ---
 
-## 📋 Incremental Roadmap
+## 🔒 Security Architecture
 
-- [x] **Step 1**: Initial Project Setup (Directory structure, Vite React, Express starter, `.gitignore`, README)
-- [ ] **Step 2**: Database Schema Design & MySQL Connection Setup
-- [ ] **Step 3**: User Authentication (Registration, Login with Email/Mobile, Password Hashing, JWT)
-- [ ] **Step 4**: Session Management (10-minute idle expiry, auto-refresh, logout invalidation)
-- [ ] **Step 5**: File Upload & Validation Pipeline (Multer 5MB limit, CSV/XLS/XLSX validation)
-- [ ] **Step 6**: File Parsing & Buyer Data Storage (Batch processing, transaction management)
-- [ ] **Step 7**: Buyer Records API (Pagination, search by Name/Email/Mobile, sorting)
-- [ ] **Step 8**: Frontend UI (Responsive Landing Page, Auth Pages, File Upload, Buyer Data Table)
-- [ ] **Step 9**: Testing, Security Hardening & Deployment Readiness
+1. **Password Hashing**: Salted bcrypt password hashing with 10 salt rounds.
+2. **Access Tokens**: Short-lived (10-minute) JWT tokens passed as `Authorization: Bearer <token>`.
+3. **Database-Backed Sessions**: Refresh tokens are 80-character cryptographically random strings stored as SHA-256 hashes in MySQL. Raw tokens are never logged or persisted in browser localStorage.
+4. **Token Rotation**: Every refresh request atomically rotates the refresh token. Old tokens are immediately invalidated.
+5. **Idle Timeout**: The server enforces a 10-minute idle session timeout based on `sessions.last_active_at`.
+6. **HttpOnly Cookies**: Refresh tokens are set with `httpOnly: true`. In production (`NODE_ENV=production`), `secure: true` (HTTPS) and `sameSite: strict` are enforced.
+7. **Multi-Tenant User Isolation**: All buyer queries and bulk uploads are scoped strictly to `req.user.userId`. Parameterized SQL queries prevent SQL injection and horizontal privilege escalation.
+8. **Atomic Ingestion**: File uploads validate all rows before writing to MySQL within an explicit transaction. Any row failure aborts the transaction with zero records inserted.

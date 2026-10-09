@@ -5,7 +5,7 @@ import path from 'path';
 
 const MAX_ALLOWED_ROWS = 5000;
 
-// Mapping of normalized header keys to standard database column keys
+// Maps normalized header variants to canonical database column names
 const HEADER_MAPPINGS = {
   name: 'name',
   buyername: 'name',
@@ -40,17 +40,11 @@ const HEADER_MAPPINGS = {
   dueamount: 'total_amount_due'
 };
 
-/**
- * Normalizes an arbitrary header string for matching
- */
 const normalizeHeaderKey = (header) => {
   if (typeof header !== 'string') return '';
   return header.toLowerCase().trim().replace(/[\s_.-]+/g, '');
 };
 
-/**
- * Normalizes Indian mobile numbers by stripping country code (+91/0) and spaces
- */
 const normalizeMobile = (value) => {
   if (value === null || value === undefined) return null;
   let str = String(value).trim().replace(/[\s-]/g, '');
@@ -66,9 +60,6 @@ const normalizeMobile = (value) => {
   return str;
 };
 
-/**
- * Parses and validates monetary fields
- */
 const parseMonetaryValue = (rawValue, fieldName, rowNumber, errors) => {
   if (rawValue === undefined || rawValue === null || String(rawValue).trim() === '') {
     return 0.00;
@@ -76,32 +67,21 @@ const parseMonetaryValue = (rawValue, fieldName, rowNumber, errors) => {
 
   const str = String(rawValue).trim();
 
-  // Reject explicitly invalid non-numeric inputs like negative signs, currency symbols, or words
+  // Reject currency symbols, negative signs, or non-numeric text
   if (!/^\d+(\.\d+)?$/.test(str)) {
-    errors.push({
-      row: rowNumber,
-      field: fieldName,
-      message: `${fieldName} must be a valid non-negative number`
-    });
+    errors.push({ row: rowNumber, field: fieldName, message: `${fieldName} must be a valid non-negative number` });
     return null;
   }
 
   const num = Number(str);
   if (isNaN(num) || num < 0) {
-    errors.push({
-      row: rowNumber,
-      field: fieldName,
-      message: `${fieldName} must be a valid non-negative number`
-    });
+    errors.push({ row: rowNumber, field: fieldName, message: `${fieldName} must be a valid non-negative number` });
     return null;
   }
 
   return Number(num.toFixed(2));
 };
 
-/**
- * Parses raw CSV buffer into an array of objects
- */
 const parseCsvBuffer = (buffer) => {
   return new Promise((resolve, reject) => {
     const results = [];
@@ -115,12 +95,9 @@ const parseCsvBuffer = (buffer) => {
   });
 };
 
-/**
- * Parses raw XLS or XLSX buffer into an array of objects
- */
 const parseExcelBuffer = (buffer) => {
   try {
-    // Disable formulas, HTML, and macros for security
+    // Disable formula evaluation and HTML rendering for security
     const workbook = xlsx.read(buffer, {
       type: 'buffer',
       cellFormula: false,
@@ -146,9 +123,6 @@ const parseExcelBuffer = (buffer) => {
   }
 };
 
-/**
- * Main service to parse buffer and perform row-level validations
- */
 export const parseAndValidateBuyersFile = async (fileBuffer, originalName) => {
   const ext = path.extname(originalName).toLowerCase();
   let rawRows = [];
@@ -171,20 +145,13 @@ export const parseAndValidateBuyersFile = async (fileBuffer, originalName) => {
   if (rawRows.length > MAX_ALLOWED_ROWS) {
     return {
       isValid: false,
-      errors: [
-        {
-          row: 0,
-          field: 'file',
-          message: `File exceeds maximum allowed row limit of ${MAX_ALLOWED_ROWS} rows (found ${rawRows.length})`
-        }
-      ]
+      errors: [{ row: 0, field: 'file', message: `File exceeds maximum allowed row limit of ${MAX_ALLOWED_ROWS} rows (found ${rawRows.length})` }]
     };
   }
 
-  // Determine header mapping from the first row keys
   const firstRow = rawRows[0];
   const originalKeys = Object.keys(firstRow);
-  const headerMap = {}; // originalKey -> standardKey
+  const headerMap = {};
   let hasNameColumn = false;
 
   for (const origKey of originalKeys) {
@@ -192,72 +159,47 @@ export const parseAndValidateBuyersFile = async (fileBuffer, originalName) => {
     const mapped = HEADER_MAPPINGS[normalizedKey];
     if (mapped) {
       headerMap[origKey] = mapped;
-      if (mapped === 'name') {
-        hasNameColumn = true;
-      }
+      if (mapped === 'name') hasNameColumn = true;
     }
   }
 
   if (!hasNameColumn) {
     return {
       isValid: false,
-      errors: [
-        {
-          row: 1,
-          field: 'name',
-          message: 'Missing required column: "Name"'
-        }
-      ]
+      errors: [{ row: 1, field: 'name', message: 'Missing required column: "Name"' }]
     };
   }
 
   const validatedRows = [];
   const errors = [];
 
-  // Validate each row (Row 1 is headers, data rows begin at index 0 => row 2)
+  // Row 1 is the header row; data starts at index 0 → displayed as row 2
   for (let i = 0; i < rawRows.length; i++) {
     const rowNum = i + 2;
     const rawRow = rawRows[i];
 
-    // Standardize object based on header map
     const mappedRow = {};
     for (const [origKey, standardKey] of Object.entries(headerMap)) {
       mappedRow[standardKey] = rawRow[origKey];
     }
 
-    // 1. Validate Name (Required, max 150)
     const rawName = mappedRow.name !== undefined ? String(mappedRow.name).trim() : '';
     if (!rawName) {
-      errors.push({
-        row: rowNum,
-        field: 'name',
-        message: 'Name is required and cannot be empty'
-      });
+      errors.push({ row: rowNum, field: 'name', message: 'Name is required and cannot be empty' });
     } else if (rawName.length > 150) {
-      errors.push({
-        row: rowNum,
-        field: 'name',
-        message: 'Name exceeds maximum allowed length of 150 characters'
-      });
+      errors.push({ row: rowNum, field: 'name', message: 'Name exceeds maximum allowed length of 150 characters' });
     }
 
-    // 2. Validate Email (Optional, valid format)
     let email = null;
     if (mappedRow.email !== undefined && mappedRow.email !== null && String(mappedRow.email).trim() !== '') {
       const emailStr = String(mappedRow.email).trim().toLowerCase();
-      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-      if (!emailRegex.test(emailStr)) {
-        errors.push({
-          row: rowNum,
-          field: 'email',
-          message: `Invalid email address format: "${emailStr}"`
-        });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailStr)) {
+        errors.push({ row: rowNum, field: 'email', message: `Invalid email address format: "${emailStr}"` });
       } else {
         email = emailStr;
       }
     }
 
-    // 3. Validate Mobile (Optional, valid Indian mobile)
     let mobile = null;
     if (mappedRow.mobile !== undefined && mappedRow.mobile !== null && String(mappedRow.mobile).trim() !== '') {
       const cleanedMobile = normalizeMobile(mappedRow.mobile);
@@ -272,22 +214,19 @@ export const parseAndValidateBuyersFile = async (fileBuffer, originalName) => {
       }
     }
 
-    // 4. Address (Optional)
     const address = mappedRow.address !== undefined && mappedRow.address !== null
       ? String(mappedRow.address).trim() || null
       : null;
 
-    // 5. Monetary Fields (Non-negative decimals, default 0.00)
     const totalInvoiceAmount = parseMonetaryValue(mappedRow.total_invoice_amount, 'Total Invoice Amount', rowNum, errors);
     const totalAmountPaid = parseMonetaryValue(mappedRow.total_amount_paid, 'Total Amount Paid', rowNum, errors);
     const totalAmountDue = parseMonetaryValue(mappedRow.total_amount_due, 'Total Amount Due', rowNum, errors);
 
-    // 6. Cross-field Monetary Consistency Check
+    // Cross-field check: Paid + Due must equal Invoice Amount (within 0.01 tolerance for rounding)
     if (totalInvoiceAmount !== null && totalAmountPaid !== null && totalAmountDue !== null) {
       const sumPaidAndDue = Number((totalAmountPaid + totalAmountDue).toFixed(2));
       const difference = Math.abs(sumPaidAndDue - totalInvoiceAmount);
 
-      // Tolerance of 0.01 for minor floating point or rounding deviations
       if (difference > 0.01) {
         errors.push({
           row: rowNum,
@@ -311,18 +250,10 @@ export const parseAndValidateBuyersFile = async (fileBuffer, originalName) => {
   }
 
   if (errors.length > 0) {
-    return {
-      isValid: false,
-      errors
-    };
+    return { isValid: false, errors };
   }
 
-  return {
-    isValid: true,
-    rows: validatedRows
-  };
+  return { isValid: true, rows: validatedRows };
 };
 
-export default {
-  parseAndValidateBuyersFile
-};
+export default { parseAndValidateBuyersFile };

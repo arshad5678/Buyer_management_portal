@@ -6,7 +6,11 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test": "node test/authTest.js && node test/buyerUploadTest.js && node test/buyerListTest.js",
+    "test:auth": "node test/authTest.js",
+    "test:upload": "node test/buyerUploadTest.js",
+    "test:list": "node test/buyerListTest.js"
   },
   "keywords": [
     "express",

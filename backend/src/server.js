@@ -10,9 +10,13 @@ import errorHandler from './middlewares/errorHandler.js';
 dotenv.config();
 
 const app = express();
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5001;
 
-// Middleware
+// Trust Render's load balancer so req.secure is true behind HTTPS termination
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
 app.use(cors({
   origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true
@@ -21,7 +25,6 @@ app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Basic health-check route verifying both server and database connectivity
 app.get('/api/health', async (req, res) => {
   let dbStatus = 'disconnected';
   try {
@@ -41,11 +44,9 @@ app.get('/api/health', async (req, res) => {
   });
 });
 
-// Mount Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/buyers', buyerRoutes);
 
-// 404 Handler for undefined routes
 app.use((req, res) => {
   res.status(404).json({
     status: 'fail',
@@ -53,10 +54,8 @@ app.use((req, res) => {
   });
 });
 
-// Centralized error handling middleware
 app.use(errorHandler);
 
-// Start server with fallback if port is in use
 const startServer = (port) => {
   const server = app.listen(port, async () => {
     console.log(`Server is running on port ${port} in ${process.env.NODE_ENV || 'development'} mode`);
@@ -65,7 +64,7 @@ const startServer = (port) => {
 
   server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-      console.warn(`[Server] Port ${port} is in use (macOS AirPlay often reserves 5000). Falling back to port ${port + 1}...`);
+      console.warn(`[Server] Port ${port} is in use. Falling back to port ${port + 1}...`);
       startServer(port + 1);
     } else {
       console.error('[Server Error]', err);

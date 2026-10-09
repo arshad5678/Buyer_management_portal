@@ -1,9 +1,18 @@
 import pool from '../config/db.js';
 
 /**
- * Buyer Model - handles database persistence and transactions for buyers table
+ * Buyer Model - handles database persistence, queries, and transactions for buyers table
  */
 class BuyerModel {
+  /**
+   * Helper to escape MySQL LIKE wildcards (%, _, \)
+   * @param {string} str
+   * @returns {string}
+   */
+  static escapeLikeWildcards(str) {
+    return str.replace(/[%_\\]/g, '\\$&');
+  }
+
   /**
    * Atomically insert multiple buyer records in a single transaction
    * @param {number} userId - Authenticated user ID from req.user
@@ -57,14 +66,96 @@ class BuyerModel {
   }
 
   /**
-   * Count total buyers for a user
-   * @param {number} userId
+   * Fetch paginated buyers for a specific user with optional search filtering
+   * @param {object} params
+   * @param {number} params.userId
+   * @param {number} params.page
+   * @param {number} params.limit
+   * @param {string} [params.search]
+   * @returns {Promise<Array<object>>}
+   */
+  static async findBuyersByUserId({ userId, page = 1, limit = 10, search = '' }) {
+    const offset = (page - 1) * limit;
+    const trimmedSearch = (search || '').trim();
+
+    if (trimmedSearch) {
+      const searchPattern = `%${this.escapeLikeWildcards(trimmedSearch)}%`;
+      const query = `
+        SELECT
+          id,
+          name,
+          email,
+          mobile,
+          address,
+          total_invoice_amount,
+          total_amount_paid,
+          total_amount_due
+        FROM buyers
+        WHERE user_id = ?
+          AND (name LIKE ? OR email LIKE ? OR mobile LIKE ?)
+        ORDER BY id DESC
+        LIMIT ? OFFSET ?
+      `;
+      const [rows] = await pool.query(query, [
+        userId,
+        searchPattern,
+        searchPattern,
+        searchPattern,
+        Number(limit),
+        Number(offset)
+      ]);
+      return rows;
+    }
+
+    const query = `
+      SELECT
+        id,
+        name,
+        email,
+        mobile,
+        address,
+        total_invoice_amount,
+        total_amount_paid,
+        total_amount_due
+      FROM buyers
+      WHERE user_id = ?
+      ORDER BY id DESC
+      LIMIT ? OFFSET ?
+    `;
+    const [rows] = await pool.query(query, [userId, Number(limit), Number(offset)]);
+    return rows;
+  }
+
+  /**
+   * Count total buyers matching user and optional search filters
+   * @param {object} params
+   * @param {number} params.userId
+   * @param {string} [params.search]
    * @returns {Promise<number>}
    */
-  static async countByUserId(userId) {
-    const query = 'SELECT COUNT(*) as count FROM buyers WHERE user_id = ?';
+  static async countBuyersByUserId({ userId, search = '' }) {
+    const trimmedSearch = (search || '').trim();
+
+    if (trimmedSearch) {
+      const searchPattern = `%${this.escapeLikeWildcards(trimmedSearch)}%`;
+      const query = `
+        SELECT COUNT(*) as total
+        FROM buyers
+        WHERE user_id = ?
+          AND (name LIKE ? OR email LIKE ? OR mobile LIKE ?)
+      `;
+      const [rows] = await pool.query(query, [
+        userId,
+        searchPattern,
+        searchPattern,
+        searchPattern
+      ]);
+      return rows[0].total;
+    }
+
+    const query = 'SELECT COUNT(*) as total FROM buyers WHERE user_id = ?';
     const [rows] = await pool.query(query, [userId]);
-    return rows[0].count;
+    return rows[0].total;
   }
 }
 

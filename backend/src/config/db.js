@@ -3,7 +3,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Create a connection pool to MySQL using mysql2/promise
 const pool = mysql.createPool({
   host: process.env.DB_HOST || 'localhost',
   port: Number(process.env.DB_PORT) || 3306,
@@ -17,10 +16,6 @@ const pool = mysql.createPool({
   keepAliveInitialDelay: 0
 });
 
-/**
- * Utility function to test database connectivity.
- * Retrieves a connection from the pool and releases it.
- */
 export const testConnection = async () => {
   try {
     const connection = await pool.getConnection();
