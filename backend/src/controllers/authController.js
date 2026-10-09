@@ -152,3 +152,34 @@ export const login = async (req, res, next) => {
     next(error);
   }
 };
+
+/**
+ * Get profile of currently authenticated user
+ * GET /api/auth/me
+ */
+export const getMe = async (req, res, next) => {
+  try {
+    const userId = req.user.userId;
+    const user = await UserModel.findById(userId);
+
+    if (!user) {
+      return res.status(401).json({
+        status: 'fail',
+        message: 'Authenticated user no longer exists'
+      });
+    }
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        mobile: user.mobile
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
